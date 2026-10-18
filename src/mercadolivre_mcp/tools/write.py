@@ -1,4 +1,4 @@
-"""Write tools: picture upload (item updates and answers are added later)."""
+"""Write tools: item updates (preview and confirm) and picture upload."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ import os
 import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from ..errors import ToolInputError
-from .read import _schema
+from .read import ITEM_ID_PROP, _schema, summarize_item
 from .registry import Tool
 
 if TYPE_CHECKING:
@@ -21,7 +22,70 @@ WRITE = {
     "openWorldHint": True,
 }
 
+UPDATE = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
 MAX_PICTURE_BYTES = 10 * 1024 * 1024
+
+
+def merge_variations(current: list[dict], requested: list[dict]) -> list[dict]:
+    """Complete a partial variations list so Mercado Livre does not delete the others.
+
+    Requested entries keep their order and content (entries without ``id`` are new
+    variations); every current variation id not mentioned is appended as ``{"id": id}``.
+    """
+    mentioned = {v.get("id") for v in requested if v.get("id") is not None}
+    merged = [dict(v) for v in requested]
+    for variation in current:
+        vid = variation.get("id")
+        if vid is not None and vid not in mentioned:
+            merged.append({"id": vid})
+    return merged
+
+
+def build_update_request(current_item: dict, fields: dict) -> dict:
+    """The exact PUT for ``fields`` against the item in its current state."""
+    body = dict(fields)
+    if "variations" in fields:
+        body["variations"] = merge_variations(
+            current_item.get("variations") or [], fields["variations"]
+        )
+    path = f"/items/{quote(str(current_item['id']), safe='')}"
+    return {"method": "PUT", "path": path, "body": body}
+
+
+def update_item(client: MLClient, args: dict) -> dict:
+    item_id = args["item_id"]
+    fields = args["fields"]
+    if not fields:
+        raise ToolInputError("fields must contain at least one field to change")
+    if "variations" in fields and not isinstance(fields["variations"], list):
+        raise ToolInputError("fields.variations must be a list of variation objects")
+    current = client.get(f"/items/{quote(item_id, safe='')}")
+    request = build_update_request({**current, "id": item_id}, fields)
+    if not args.get("confirm", False):
+        return {
+            "preview": True,
+            "item_id": item_id,
+            "request": request,
+            "before": {k: current.get(k) for k in fields},
+            "after": request["body"],
+            "notice": (
+                "Nothing was changed. Show this preview to the user and call again "
+                "with confirm=true only after they approve it."
+            ),
+        }
+    response = client.put(request["path"], request["body"])
+    return {
+        "preview": False,
+        "item_id": item_id,
+        "request": request,
+        "result": summarize_item(response),
+    }
 
 
 def _image_type(head: bytes) -> str | None:
@@ -85,6 +149,42 @@ def upload_picture(client: MLClient, args: dict) -> dict:
 
 
 WRITE_TOOLS = [
+    Tool(
+        name="ml_update_item",
+        title="Update item",
+        description=(
+            "Change fields of one of your Mercado Livre items (price, stock, title, status, "
+            "pictures, variations, ...). Nothing is changed unless confirm=true. Call it "
+            "without confirm first to get a preview (before, after and the exact request), "
+            "show that preview to the user, and call again with confirm=true only after "
+            "their explicit approval. Partial `variations` are completed with the ids of "
+            "the item's other variations, because Mercado Livre deletes any variation "
+            "missing from the request."
+        ),
+        input_schema=_schema(
+            {
+                "item_id": ITEM_ID_PROP,
+                "fields": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "description": (
+                        'Fields to change, sent as the PUT body, for example {"price": 59.9}.'
+                    ),
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "false (default) returns a preview and changes nothing; "
+                        "true applies the change."
+                    ),
+                },
+            },
+            required=["item_id", "fields"],
+        ),
+        annotations=UPDATE,
+        handler=update_item,
+    ),
     Tool(
         name="ml_upload_picture",
         title="Upload picture",
