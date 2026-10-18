@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import secrets
 import sys
 import urllib.parse
@@ -44,7 +45,13 @@ def _serve(config: Config, stdin: TextIO, stdout: TextIO) -> int:
     try:
         server.serve(stdin, stdout)
     except BrokenPipeError:
-        # The client went away; nothing left to tell it.
+        # The client went away; nothing left to tell it. The failed write stays in
+        # the buffer and would be re-flushed at shutdown (exit 120), so point
+        # fd 1 at devnull first.
+        if stdout is sys.stdout:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
         return 0
     return 0
 

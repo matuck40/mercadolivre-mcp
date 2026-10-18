@@ -1,6 +1,9 @@
 import io
 import json
+import os
 import stat
+import subprocess
+import sys
 
 import pytest
 
@@ -129,6 +132,40 @@ def test_serve_broken_pipe_ends_quietly(tmp_path):
 
     stdin = io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n")
     assert cli.main([], config=Config(secrets_dir=tmp_path), stdin=stdin, stdout=BrokenOut()) == 0
+
+
+def _spawn(tmp_path):
+    env = {"PATH": os.environ.get("PATH", ""), "ML_SECRETS_DIR": str(tmp_path)}
+    return subprocess.Popen(  # noqa: S603 - fixed argv, test only
+        [sys.executable, "-m", "mercadolivre_mcp"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+
+
+PING = b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n'
+
+
+def test_real_broken_pipe_exits_0_with_empty_stderr(tmp_path):
+    proc = _spawn(tmp_path)
+    proc.stdout.close()
+    try:
+        _, err = proc.communicate(PING * 2, timeout=30)
+    finally:
+        proc.kill()
+    assert proc.returncode == 0
+    assert err == b""
+
+
+def test_non_utf8_stdin_line_does_not_crash(tmp_path):
+    proc = _spawn(tmp_path)
+    out, err = proc.communicate(b"\xff\xfe not json\n" + PING, timeout=30)
+    assert proc.returncode == 0, err
+    lines = [json.loads(line) for line in out.decode().splitlines()]
+    assert lines[0]["error"]["code"] == -32700
+    assert lines[1]["id"] == 1
 
 
 def test_auth_without_subcommand_is_usage_error():
