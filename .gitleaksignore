@@ -1,0 +1,3 @@
+# Fake test fixture, not a real key: an earlier commit had a made-up OpenSSH key header and
+# body in tests/security_scenarios.py to prove the upload guard refuses non-images.
+b740a6d9d48e6a3aea9cf19426dfe71d2c76f5cc:tests/security_scenarios.py:private-key:17

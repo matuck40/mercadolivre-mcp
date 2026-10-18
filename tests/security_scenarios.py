@@ -13,11 +13,9 @@ from typing import Any, Protocol
 from fake_ml import FakeML, RecordedRequest
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
-PRIVATE_KEY = (
-    b"-----BEGIN OPENSSH PRIVATE KEY-----\n"
-    b"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n"
-    b"-----END OPENSSH PRIVATE KEY-----\n"
-)
+# Looks like the start of a private key file but is obviously fake (no key body, no END
+# line), so secret scanners do not flag it. What matters here is that it is not an image.
+PRIVATE_KEY = b"-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key\n"
 
 
 class Target(Protocol):
