@@ -16,8 +16,40 @@ from .errors import AuthError
 from .http import request
 
 TOKEN_FILE = "token.json"  # noqa: S105 - a file name, not a secret
+STATE_FILE = "oauth_state"
 REFRESH_MARGIN_SECONDS = 120
 DEFAULT_EXPIRES_IN = 21600
+
+
+def _write_private(path: Path, payload: bytes) -> None:
+    """Write ``payload`` to ``path`` with mode 0600, creating the parent dir with 0700."""
+    directory = path.parent
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    dir_mode = stat.S_IMODE(os.stat(directory).st_mode)
+    if dir_mode & 0o077:
+        os.chmod(directory, dir_mode & 0o700)
+
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        # Also fixes a pre-existing file that was created with looser bits.
+        os.fchmod(fd, 0o600)
+        os.write(fd, payload)
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)
+
+
+def save_oauth_state(secrets_dir: Path, state: str) -> None:
+    """Persist the pending OAuth ``state`` (an empty string clears it)."""
+    _write_private(Path(secrets_dir) / STATE_FILE, state.encode("utf-8"))
+
+
+def load_oauth_state(secrets_dir: Path) -> str:
+    """Return the saved OAuth ``state``, or an empty string when none is pending."""
+    try:
+        return (Path(secrets_dir) / STATE_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 class TokenStore:
@@ -55,21 +87,7 @@ class TokenStore:
             expires_in = DEFAULT_EXPIRES_IN
         saved["expires_at"] = self._now() + float(expires_in) - REFRESH_MARGIN_SECONDS
 
-        directory = self.path.parent
-        os.makedirs(directory, mode=0o700, exist_ok=True)
-        dir_mode = stat.S_IMODE(os.stat(directory).st_mode)
-        if dir_mode & 0o077:
-            os.chmod(directory, dir_mode & 0o700)
-
-        payload = json.dumps(saved, indent=2).encode("utf-8")
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            # Also fixes a pre-existing file that was created with looser bits.
-            os.fchmod(fd, 0o600)
-            os.write(fd, payload)
-        finally:
-            os.close(fd)
-        os.chmod(self.path, 0o600)
+        _write_private(self.path, json.dumps(saved, indent=2).encode("utf-8"))
         return saved
 
     def is_expired(self, token: dict[str, Any]) -> bool:
