@@ -1,0 +1,39 @@
+[project]
+name = "mercadolivre-mcp"
+version = "0.1.0"
+description = "Stdio MCP server for the Mercado Livre seller API"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Lucca Matuck" }]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mercadolivre-mcp = "mercadolivre_mcp.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "jsonschema==4.26.0",
+    "pytest==9.1.1",
+    "ruff==0.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["docs", "legacy", "local", ".superpowers"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
