@@ -148,6 +148,42 @@ def upload_picture(client: MLClient, args: dict) -> dict:
     }
 
 
+def answer_question(client: MLClient, args: dict) -> dict:
+    question_id = args["question_id"]
+    text = args["text"]
+    if not text.strip():
+        raise ToolInputError("text must contain more than whitespace")
+    question = client.get(f"/questions/{question_id}?api_version=4")
+    request = {
+        "method": "POST",
+        "path": "/answers",
+        "body": {"question_id": question_id, "text": text},
+    }
+    if not args.get("confirm", False):
+        return {
+            "preview": True,
+            "question_id": question_id,
+            "request": request,
+            "before": {
+                "question": question.get("text"),
+                "status": question.get("status"),
+                "existing_answer": (question.get("answer") or {}).get("text"),
+            },
+            "after": {"answer": text},
+            "notice": (
+                "Nothing was sent. Show this preview to the user and call again "
+                "with confirm=true only after they approve it."
+            ),
+        }
+    response = client.post(request["path"], request["body"])
+    return {
+        "preview": False,
+        "question_id": question_id,
+        "request": request,
+        "result": response,
+    }
+
+
 WRITE_TOOLS = [
     Tool(
         name="ml_update_item",
@@ -206,5 +242,42 @@ WRITE_TOOLS = [
         ),
         annotations=WRITE,
         handler=upload_picture,
+    ),
+    Tool(
+        name="ml_answer_question",
+        title="Answer question",
+        description=(
+            "Answer a buyer question on one of your Mercado Livre listings. The answer is "
+            "public on the listing. Nothing is sent unless confirm=true. Call it without "
+            "confirm first to get a preview (the question and the exact request), show that "
+            "preview to the user, and call again with confirm=true only after their "
+            "explicit approval."
+        ),
+        input_schema=_schema(
+            {
+                "question_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Id of the question to answer (see ml_list_questions).",
+                },
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "The answer text (max 2000 characters).",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "false (default) returns a preview and sends nothing; "
+                        "true posts the answer."
+                    ),
+                },
+            },
+            required=["question_id", "text"],
+        ),
+        annotations=WRITE,
+        handler=answer_question,
     ),
 ]
