@@ -139,9 +139,25 @@ def _read_picture(file_path: str) -> tuple[Path, bytes, str]:
     return path, data, content_type
 
 
+UPLOAD_PATH = "/pictures/items/upload"
+
+
 def upload_picture(client: MLClient, args: dict) -> dict:
+    # The file guard runs first in both modes, so a refused file never reaches a preview.
     path, data, content_type = _read_picture(args["file_path"])
-    resp = client.upload("/pictures/items/upload", data, path.name, content_type)
+    if not args.get("confirm", False):
+        return {
+            "preview": True,
+            "file_path": args["file_path"],
+            "content_type": content_type,
+            "size_bytes": len(data),
+            "request": {"method": "POST", "path": UPLOAD_PATH},
+            "notice": (
+                "Nothing was uploaded. Show this preview to the user and call again "
+                "with confirm=true only after they approve it."
+            ),
+        }
+    resp = client.upload(UPLOAD_PATH, data, path.name, content_type)
     return {
         "picture_id": resp["id"],
         "max_size": resp.get("max_size"),
@@ -231,8 +247,11 @@ WRITE_TOOLS = [
         description=(
             "Upload a local image to Mercado Livre and return its picture id. Only real "
             "JPEG, PNG or WEBP files up to 10 MB are accepted, given by absolute path; "
-            "anything else is refused. The picture is not attached to any item until you "
-            "use the id with ml_update_item."
+            "anything else is refused. An uploaded picture gets a public URL on Mercado "
+            "Livre's CDN, even before it is attached to an item with ml_update_item. "
+            "Nothing is uploaded unless confirm=true. Call it without confirm first to get "
+            "a preview (file, type and size), show that preview to the user, and call again "
+            "with confirm=true only after their explicit approval."
         ),
         input_schema=_schema(
             {
@@ -240,7 +259,15 @@ WRITE_TOOLS = [
                     "type": "string",
                     "minLength": 1,
                     "description": "Absolute path of a JPEG, PNG or WEBP file (max 10 MB).",
-                }
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "false (default) checks the file and returns a preview without "
+                        "uploading; true uploads it."
+                    ),
+                },
             },
             required=["file_path"],
         ),

@@ -19,7 +19,7 @@ EXPECTED_TOOLS = {
     "ml_upload_picture",
     "ml_answer_question",
 }
-GATED = ("ml_update_item", "ml_answer_question")
+GATED = ("ml_update_item", "ml_answer_question", "ml_upload_picture")
 
 
 def test_registry_has_the_ten_tools():

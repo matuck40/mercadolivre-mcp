@@ -31,7 +31,7 @@ def test_upload_png_sends_multipart_and_returns_id(client, fake_ml, tmp_path):
     route_upload(fake_ml)
     path = tmp_path / "photo.png"
     path.write_bytes(PNG)
-    result = run(client, {"file_path": str(path)})
+    result = run(client, {"file_path": str(path), "confirm": True})
     assert not result.get("isError"), result
     out = result["structuredContent"]
     assert out["picture_id"] == "pic-new-1"
@@ -50,7 +50,7 @@ def test_upload_accepts_jpeg_and_webp(client, fake_ml, tmp_path):
     for name, data, ctype in (("a.bin", JPEG, b"image/jpeg"), ("b.bin", WEBP, b"image/webp")):
         path = tmp_path / name
         path.write_bytes(data)
-        assert not run(client, {"file_path": str(path)}).get("isError")
+        assert not run(client, {"file_path": str(path), "confirm": True}).get("isError")
         assert b"Content-Type: " + ctype in fake_ml.writes()[-1].body
 
 
@@ -101,5 +101,45 @@ def test_upload_content_type_from_magic(client, fake_ml, tmp_path):
     route_upload(fake_ml)
     path = tmp_path / "a.jpg"
     path.write_bytes(PNG)
-    assert not run(client, {"file_path": str(path)}).get("isError")
+    assert not run(client, {"file_path": str(path), "confirm": True}).get("isError")
     assert b"Content-Type: image/png" in fake_ml.writes()[0].body
+
+
+def test_preview_makes_no_request(client, fake_ml, tmp_path):
+    route_upload(fake_ml)
+    path = tmp_path / "photo.png"
+    path.write_bytes(PNG)
+    result = run(client, {"file_path": str(path)})
+    assert not result.get("isError"), result
+    assert result["structuredContent"] == {
+        "preview": True,
+        "file_path": str(path),
+        "content_type": "image/png",
+        "size_bytes": len(PNG),
+        "request": {"method": "POST", "path": "/pictures/items/upload"},
+        "notice": (
+            "Nothing was uploaded. Show this preview to the user and call again "
+            "with confirm=true only after they approve it."
+        ),
+    }
+    assert fake_ml.requests == []
+
+
+def test_confirm_false_explicit_is_preview(client, fake_ml, tmp_path):
+    route_upload(fake_ml)
+    path = tmp_path / "photo.png"
+    path.write_bytes(PNG)
+    out = run(client, {"file_path": str(path), "confirm": False})["structuredContent"]
+    assert out["preview"] is True
+    assert fake_ml.requests == []
+
+
+def test_guard_runs_before_the_gate_with_confirm(client, fake_ml, tmp_path):
+    route_upload(fake_ml)
+    key = tmp_path / "key.png"
+    key.write_bytes(b"not an image")
+    for file_path in ("photo.png", str(key), str(tmp_path)):
+        for confirm in (False, True):
+            result = run(client, {"file_path": file_path, "confirm": confirm})
+            assert result["isError"], (file_path, confirm)
+    assert fake_ml.requests == []
