@@ -49,7 +49,9 @@ def scenario_upload_refuses_relative_path(
     target: Target, fake_ml: FakeML, fake_other_host: FakeML, tmp_path: Path
 ) -> None:
     _upload_route(fake_ml)
-    (target.base_dir / "photo.png").write_bytes(PNG_BYTES)
+    photo = target.base_dir / "photo.png"
+    photo.write_bytes(PNG_BYTES)
+    assert photo.is_file()  # the file exists where a relative path would resolve
     result = target.call_tool("ml_upload_picture", {"file_path": "photo.png"})
     assert result.get("isError"), f"relative path was accepted: {result}"
     assert fake_ml.writes() == [], (
@@ -69,6 +71,7 @@ def scenario_redirect_does_not_leak_token(
     )
     fake_other_host.route("GET", "/users/me", body={"id": 123, "nickname": "TESTUSER"})
     target.call_tool("ml_get_account", {})
+    assert "/users/me" in [r.path for r in fake_ml.requests], "no request reached the API"
     leaked: list[RecordedRequest] = [
         r for r in fake_other_host.requests if "Authorization" in r.headers
     ]
@@ -88,8 +91,10 @@ def scenario_ambiguous_path_sends_nothing(
 def scenario_401_refreshes_and_retries(
     target: Target, fake_ml: FakeML, fake_other_host: FakeML, tmp_path: Path
 ) -> None:
+    calls: list[int] = []
+
     def users_me(request: RecordedRequest) -> tuple[int, Any]:
-        calls = [r for r in fake_ml.requests if r.path == "/users/me"]
+        calls.append(1)
         if len(calls) == 1:
             return 401, {"message": "invalid_token"}
         return 200, {"id": 123, "nickname": "TESTUSER"}

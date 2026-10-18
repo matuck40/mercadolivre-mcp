@@ -43,6 +43,8 @@ def test_scenario_passes_on_new_code(
     fake_ml: FakeML,
     fake_other_host: FakeML,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.chdir(tmp_path)  # relative paths resolve here, where base_dir points
     target = NewTarget(config, store, tmp_path)
     getattr(security_scenarios, scenario)(target, fake_ml, fake_other_host, tmp_path)
