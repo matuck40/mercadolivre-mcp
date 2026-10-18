@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bloqueia comandos git destrutivos. git push não está aqui: ele pede confirmação pelo settings.json.
+# Blocks destructive git commands. git push is not listed here: settings.json asks for confirmation instead.
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 DANGEROUS_PATTERNS=(
