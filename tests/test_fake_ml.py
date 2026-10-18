@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -81,3 +82,45 @@ def test_other_host_is_independent_and_differs(fake_ml: FakeML, fake_other_host:
     status, body = _call(fake_other_host.url + "/x")
     assert (status, json.loads(body)) == (200, {"from": "other"})
     assert fake_ml.requests == []
+
+
+def test_route_headers_and_redirect_not_followed(fake_ml: FakeML, fake_other_host: FakeML) -> None:
+    target = fake_other_host.url + "/x"
+    fake_ml.route("GET", "/r", status=302, headers={"Location": target})
+    fake_ml.route(
+        "GET", "/h", handler=lambda req: (307, {"a": 1}, {"Location": target, "X-Test": "1"})
+    )
+    host, port = fake_ml.url.removeprefix("http://").split(":")
+    conn = http.client.HTTPConnection(host, int(port))
+    conn.request("GET", "/r")
+    resp = conn.getresponse()
+    resp.read()
+    assert resp.status == 302
+    assert resp.getheader("Location") == target
+    conn.request("GET", "/h")
+    resp = conn.getresponse()
+    resp.read()
+    assert resp.status == 307
+    assert resp.getheader("Location") == target
+    assert resp.getheader("X-Test") == "1"
+    conn.close()
+
+
+def test_handler_exception_returns_500(fake_ml: FakeML) -> None:
+    def boom(req: RecordedRequest):
+        raise ValueError("bad thing")
+
+    fake_ml.route("GET", "/boom", handler=boom)
+    status, body = _call(fake_ml.url + "/boom")
+    assert status == 500
+    assert json.loads(body) == {"message": "ValueError: bad thing"}
+
+
+def test_request_headers_are_case_insensitive(fake_ml: FakeML) -> None:
+    fake_ml.route("GET", "/a")
+    _call(fake_ml.url + "/a", headers={"Authorization": "Bearer test-token"})
+    headers = fake_ml.requests[0].headers
+    assert headers["authorization"] == "Bearer test-token"
+    assert headers["Authorization"] == "Bearer test-token"
+    assert headers.get("AUTHORIZATION") == "Bearer test-token"
+    assert "authorization" in headers

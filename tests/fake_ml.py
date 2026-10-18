@@ -15,12 +15,35 @@ from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlsplit
 
 
+class Headers(dict[str, str]):
+    """Dict with case-insensitive lookups; original key spelling is kept."""
+
+    def _find(self, key: object) -> str | None:
+        if isinstance(key, str):
+            lowered = key.lower()
+            for existing in dict.keys(self):
+                if existing.lower() == lowered:
+                    return existing
+        return None
+
+    def __getitem__(self, key: str) -> str:
+        found = self._find(key)
+        return super().__getitem__(key if found is None else found)
+
+    def __contains__(self, key: object) -> bool:
+        return self._find(key) is not None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        found = self._find(key)
+        return default if found is None else super().__getitem__(found)
+
+
 @dataclass
 class RecordedRequest:
     method: str
     path: str
     query: dict[str, list[str]]
-    headers: dict[str, str]
+    headers: Headers
     body: bytes
 
     @property
@@ -39,7 +62,7 @@ class RecordedRequest:
         return dict(parse_qsl(self.body.decode("utf-8", errors="replace")))
 
 
-Handler = Callable[[RecordedRequest], tuple[int, Any]]
+Handler = Callable[[RecordedRequest], tuple[int, Any] | tuple[int, Any, dict[str, str]]]
 
 
 @dataclass
@@ -47,6 +70,7 @@ class _Route:
     status: int
     body: Any
     handler: Handler | None
+    headers: dict[str, str] | None
 
 
 class FakeML:
@@ -65,8 +89,9 @@ class FakeML:
         status: int = 200,
         body: Any = None,
         handler: Handler | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
-        self._routes[(method.upper(), path)] = _Route(status, body, handler)
+        self._routes[(method.upper(), path)] = _Route(status, body, handler, headers)
 
     def writes(self) -> list[RecordedRequest]:
         return [r for r in self.requests if r.method != "GET"]
@@ -82,17 +107,25 @@ class FakeML:
                     method=self.command,
                     path=parts.path,
                     query=parse_qs(parts.query),
-                    headers={k: v for k, v in self.headers.items()},
+                    headers=Headers(self.headers.items()),
                     body=self.rfile.read(length) if length else b"",
                 )
                 fake.requests.append(recorded)
                 route = fake._routes.get((self.command, parts.path))
+                extra: dict[str, str] = {}
                 if route is None:
                     status, payload = 404, {"message": "not found"}
                 elif route.handler is not None:
-                    status, payload = route.handler(recorded)
+                    try:
+                        result = route.handler(recorded)
+                        status, payload = result[0], result[1]
+                        if len(result) > 2:
+                            extra = result[2]
+                    except Exception as exc:  # noqa: BLE001
+                        status, payload = 500, {"message": f"{type(exc).__name__}: {exc}"}
                 else:
                     status, payload = route.status, route.body
+                    extra = route.headers or {}
                 if isinstance(payload, bytes):
                     data, ctype = payload, "application/octet-stream"
                 elif isinstance(payload, str):
@@ -101,6 +134,8 @@ class FakeML:
                     data, ctype = json.dumps(payload).encode(), "application/json"
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
+                for name, value in extra.items():
+                    self.send_header(name, value)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
