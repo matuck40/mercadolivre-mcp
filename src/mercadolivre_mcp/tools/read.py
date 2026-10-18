@@ -1,7 +1,8 @@
-"""Read-only tools: account, item listing, item detail and item visits."""
+"""Read-only tools: account, items, visits, questions, orders and raw GET."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode
 
@@ -141,6 +142,111 @@ def get_item_visits(client: MLClient, args: dict) -> dict:
     }
 
 
+def orders_since(days: int, now: datetime | None = None) -> str:
+    """Local midnight ``days`` ago, as ``YYYY-MM-DDT00:00:00.000+HH:MM``.
+
+    The offset is the machine's local one (or the one carried by ``now``), never a
+    hard-coded zone. A naive ``now`` is read as local time.
+    """
+    if now is None:
+        now = datetime.now().astimezone()
+    elif now.tzinfo is None:
+        now = now.astimezone()
+    start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    minutes = round((start.utcoffset() or timedelta()).total_seconds() / 60)
+    sign = "-" if minutes < 0 else "+"
+    hours, rest = divmod(abs(minutes), 60)
+    return f"{start:%Y-%m-%dT%H:%M:%S}.000{sign}{hours:02d}:{rest:02d}"
+
+
+def list_questions(client: MLClient, args: dict) -> dict:
+    limit = args.get("limit", 20)
+    offset = args.get("offset", 0)
+    params = {
+        "seller_id": client.user_id(),
+        "status": args.get("status", "UNANSWERED"),
+        "api_version": 4,
+        "limit": limit,
+        "offset": offset,
+    }
+    if args.get("item_id"):
+        params["item"] = args["item_id"]
+    data = client.get(f"/questions/search?{urlencode(params)}")
+    raw = data.get("questions") or []
+    total = data.get("total", (data.get("paging") or {}).get("total", len(raw)))
+    return {
+        "questions": [
+            {
+                "id": q.get("id"),
+                "item_id": q.get("item_id"),
+                "date_created": q.get("date_created"),
+                "text": q.get("text"),
+                "status": q.get("status"),
+                "answer": (q.get("answer") or {}).get("text"),
+            }
+            for q in raw
+        ],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(raw) < total,
+    }
+
+
+def list_orders(client: MLClient, args: dict) -> dict:
+    days = args.get("days", 30)
+    limit = args.get("limit", 50)
+    offset = args.get("offset", 0)
+    query = urlencode(
+        {
+            "seller": client.user_id(),
+            "order.date_created.from": orders_since(days),
+            "sort": "date_desc",
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+    data = client.get(f"/orders/search?{query}")
+    results = data.get("results") or []
+    rows = []
+    for order in results:
+        for line in order.get("order_items") or []:
+            item = line.get("item") or {}
+            variation = ", ".join(
+                str(a.get("value_name")) for a in item.get("variation_attributes") or []
+            )
+            rows.append(
+                {
+                    "order_id": order.get("id"),
+                    "date_created": order.get("date_created"),
+                    "status": order.get("status"),
+                    "item_id": item.get("id"),
+                    "title": item.get("title"),
+                    "variation": variation,
+                    "quantity": line.get("quantity"),
+                    "unit_price": line.get("unit_price"),
+                    "sale_fee": line.get("sale_fee"),
+                    "total_amount": order.get("total_amount"),
+                }
+            )
+    total = (data.get("paging") or {}).get("total", len(results))
+    return {
+        "days": days,
+        "orders": rows,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(results) < total,
+    }
+
+
+def api_get(client: MLClient, args: dict) -> dict:
+    path = args["path"]
+    if not path.startswith("/"):
+        path = "/" + path
+    return {"path": path, "response": client.get(path)}
+
+
 READ_TOOLS = [
     Tool(
         name="ml_get_account",
@@ -216,5 +322,94 @@ READ_TOOLS = [
         ),
         annotations=READ_ONLY,
         handler=get_item_visits,
+    ),
+    Tool(
+        name="ml_list_questions",
+        title="List questions",
+        description=(
+            "Read-only. List buyer questions on the seller's items, filtered by status "
+            "(UNANSWERED or ANSWERED) and optionally by item. Paginated with limit and offset."
+        ),
+        input_schema=_schema(
+            {
+                "status": {
+                    "type": "string",
+                    "enum": ["UNANSWERED", "ANSWERED"],
+                    "default": "UNANSWERED",
+                    "description": "Question status to list.",
+                },
+                "item_id": {**ITEM_ID_PROP, "description": "Only questions on this item."},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 20,
+                    "description": "Page size.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Number of questions to skip.",
+                },
+            }
+        ),
+        annotations=READ_ONLY,
+        handler=list_questions,
+    ),
+    Tool(
+        name="ml_list_orders",
+        title="List orders",
+        description=(
+            "Read-only. List the seller's orders from the last N days, newest first, one row "
+            "per order item (price, quantity, sale fee). Paginated by order with limit and "
+            "offset."
+        ),
+        input_schema=_schema(
+            {
+                "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365,
+                    "default": 30,
+                    "description": "Number of days to look back.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 50,
+                    "description": "Number of orders per page.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Number of orders to skip.",
+                },
+            }
+        ),
+        annotations=READ_ONLY,
+        handler=list_orders,
+    ),
+    Tool(
+        name="ml_api_get",
+        title="Raw API GET",
+        description=(
+            "Read-only. Send a GET request to a Mercado Livre API path and return the JSON "
+            "response, for example /categories/MLB1234. Only paths on the API host are allowed."
+        ),
+        input_schema=_schema(
+            {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "API path with optional query, for example /categories/MLB1234.",
+                }
+            },
+            required=["path"],
+        ),
+        annotations=READ_ONLY,
+        handler=api_get,
     ),
 ]
