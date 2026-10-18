@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -124,3 +125,11 @@ def test_request_headers_are_case_insensitive(fake_ml: FakeML) -> None:
     assert headers["Authorization"] == "Bearer test-token"
     assert headers.get("AUTHORIZATION") == "Bearer test-token"
     assert "authorization" in headers
+
+
+def test_stop_is_fast() -> None:
+    server = FakeML()
+    server.start()
+    started = time.monotonic()
+    server.stop()
+    assert time.monotonic() - started < 0.2

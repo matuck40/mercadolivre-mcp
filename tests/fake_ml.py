@@ -149,7 +149,11 @@ class FakeML:
         self._server.daemon_threads = True
         port = self._server.server_address[1]
         self.url = f"http://{self._advertised_host}:{port}"
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        # A short poll interval makes shutdown() return almost at once; the default
+        # 0.5 s poll made every test teardown wait for it.
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
