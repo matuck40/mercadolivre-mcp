@@ -122,16 +122,25 @@ class Server:
         tool = self.tools.get(name) if isinstance(name, str) else None
         if tool is None:
             return _error(msg_id, -32602, f"Unknown tool: {name}")
+        arguments = params.get("arguments")
+        if arguments is None:  # some clients send null for tools without arguments
+            arguments = {}
         try:
-            args = validate_arguments(tool.input_schema, params.get("arguments", {}))
+            args = validate_arguments(tool.input_schema, arguments)
             data = tool.handler(self._get_client(), args)
         except ToolInputError as exc:
             return _result(msg_id, _tool_error(str(exc)))
         except MLError as exc:
             return _result(msg_id, _tool_error(f"Error: {exc}"))
         except Exception as exc:
+            # The message may hold anything (even a header value), so it stays in the log.
             self._log_traceback()
-            return _result(msg_id, _tool_error(f"Unexpected error ({type(exc).__name__}): {exc}"))
+            return _result(
+                msg_id,
+                _tool_error(
+                    f"Unexpected error ({type(exc).__name__}). See the server log for details."
+                ),
+            )
         text = json.dumps(data, ensure_ascii=False, indent=2)
         return _result(
             msg_id, {"content": [{"type": "text", "text": text}], "structuredContent": data}

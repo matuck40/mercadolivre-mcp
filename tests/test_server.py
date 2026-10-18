@@ -22,7 +22,7 @@ def _echo(client, args):
 
 
 def _boom(client, args):
-    raise RuntimeError("kaboom")
+    raise RuntimeError("secret-xyz")
 
 
 def _api_fail(client, args):
@@ -45,6 +45,7 @@ def make_tools():
         "echo": tool("echo", _echo, ECHO_SCHEMA),
         "boom": tool("boom", _boom, empty),
         "api_fail": tool("api_fail", _api_fail, empty),
+        "no_args": tool("no_args", _echo, empty),
     }
 
 
@@ -109,7 +110,7 @@ def test_ping():
 def test_tools_list_shape():
     server, _ = make_server()
     tools = server.handle(rpc("tools/list"))["result"]["tools"]
-    assert [t["name"] for t in tools] == ["echo", "boom", "api_fail"]
+    assert [t["name"] for t in tools] == ["echo", "boom", "api_fail", "no_args"]
     assert set(tools[0]) == {"name", "title", "description", "inputSchema", "annotations"}
     assert tools[0]["inputSchema"] == ECHO_SCHEMA
 
@@ -190,8 +191,27 @@ def test_unexpected_exception_logs_to_stderr_not_stdout():
     server, _ = make_server(stderr)
     result = call(server, "boom")["result"]
     assert result["isError"] is True
-    assert result["content"][0]["text"] == "Unexpected error (RuntimeError): kaboom"
-    assert "Traceback" in stderr.getvalue() and "kaboom" in stderr.getvalue()
+    assert result["content"][0]["text"] == (
+        "Unexpected error (RuntimeError). See the server log for details."
+    )
+    assert "secret-xyz" not in json.dumps(result)
+    assert "Traceback" in stderr.getvalue() and "secret-xyz" in stderr.getvalue()
+
+
+def test_null_arguments_are_an_empty_object():
+    server, _ = make_server()
+    response = server.handle(rpc("tools/call", {"name": "no_args", "arguments": None}))
+    result = response["result"]
+    assert not result.get("isError"), result
+    assert result["structuredContent"]["echo"] == {}
+
+
+def test_null_arguments_still_check_required():
+    server, _ = make_server()
+    response = server.handle(rpc("tools/call", {"name": "echo", "arguments": None}))
+    result = response["result"]
+    assert result["isError"] is True
+    assert "item_id" in result["content"][0]["text"]
 
 
 def test_notification_returns_none():
