@@ -37,13 +37,15 @@ def merge_variations(current: list[dict], requested: list[dict]) -> list[dict]:
 
     Requested entries keep their order and content (entries without ``id`` are new
     variations); every current variation id not mentioned is appended as ``{"id": id}``.
+    Ids are compared as strings, because a model may send ``"2"`` for the id ``2``.
     """
-    mentioned = {v.get("id") for v in requested if v.get("id") is not None}
+    mentioned = {str(v["id"]) for v in requested if v.get("id") is not None}
     merged = [dict(v) for v in requested]
     for variation in current:
         vid = variation.get("id")
-        if vid is not None and vid not in mentioned:
+        if vid is not None and str(vid) not in mentioned:
             merged.append({"id": vid})
+            mentioned.add(str(vid))
     return merged
 
 
@@ -65,6 +67,8 @@ def update_item(client: MLClient, args: dict) -> dict:
         raise ToolInputError("fields must contain at least one field to change")
     if "variations" in fields and not isinstance(fields["variations"], list):
         raise ToolInputError("fields.variations must be a list of variation objects")
+    if "variations" in fields and not all(isinstance(v, dict) for v in fields["variations"]):
+        raise ToolInputError("every entry of fields.variations must be a variation object")
     current = client.get(f"/items/{quote(item_id, safe='')}")
     request = build_update_request({**current, "id": item_id}, fields)
     if not args.get("confirm", False):

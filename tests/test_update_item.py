@@ -142,6 +142,32 @@ def test_variations_must_be_a_list(client, fake_ml):
     assert fake_ml.writes() == []
 
 
+def test_variation_id_as_string_matches_numeric_id(client, fake_ml):
+    route_item(fake_ml, ITEM_WITH_VARIATIONS)
+    run(
+        client,
+        {
+            "item_id": "MLB000000001",
+            "fields": {"variations": [{"id": "2", "price": 9}]},
+            "confirm": True,
+        },
+    )
+    (req,) = fake_ml.writes()
+    assert req.json["variations"] == [{"id": "2", "price": 9}, {"id": 1}, {"id": 3}]
+
+
+def test_variation_entries_must_be_objects(client, fake_ml):
+    route_item(fake_ml, ITEM_WITH_VARIATIONS)
+    result = run(
+        client,
+        {"item_id": "MLB000000001", "fields": {"variations": [2]}, "confirm": True},
+    )
+    assert result["isError"] is True
+    assert "variation" in result["content"][0]["text"]
+    assert "Unexpected error" not in result["content"][0]["text"]
+    assert fake_ml.requests == []
+
+
 def test_put_error_is_is_error(client, fake_ml):
     fake_ml.route("GET", "/items/MLB000000001", body=ITEM)
     fake_ml.route("PUT", "/items/MLB000000001", status=400, body={"message": "bad price"})
