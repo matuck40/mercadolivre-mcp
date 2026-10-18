@@ -19,7 +19,7 @@ from mercadolivre_mcp.auth import (
 )
 from mercadolivre_mcp.client import MLClient
 from mercadolivre_mcp.config import Config
-from mercadolivre_mcp.errors import AuthError, ConfigError
+from mercadolivre_mcp.errors import AuthError, MLError
 from mercadolivre_mcp.server import Server
 from mercadolivre_mcp.tools import TOOLS
 
@@ -117,6 +117,6 @@ def main(
         if args.auth_command == "url":
             return _auth_url(cfg, stdout)
         return _auth_code(cfg, args.code, stdout)
-    except (ConfigError, AuthError) as exc:
+    except MLError as exc:  # config, auth and network errors: a message, not a traceback
         print(str(exc), file=sys.stderr)
         return 2

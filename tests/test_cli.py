@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -98,6 +99,35 @@ def test_auth_code_failure_exits_2(config, fake_ml, capsys):
     fake_ml.route("POST", "/oauth/token", status=400, body={"error": "invalid_grant"})
     assert cli.main(["auth", "code", "TG-bad"], config=config) == 2
     assert "invalid_grant" in capsys.readouterr().err
+
+
+def _closed_port_config(tmp_path):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    return Config(
+        secrets_dir=tmp_path / "secrets",
+        client_id="test-client",
+        client_secret="test-secret",
+        redirect_uri="https://example.test/callback",
+        api_base=base,
+        auth_base=base,
+    )
+
+
+def test_auth_code_network_error_exits_2_without_traceback(tmp_path, capsys):
+    config = _closed_port_config(tmp_path)
+    assert cli.main(["auth", "code", "TG-code"], config=config) == 2
+    err = capsys.readouterr().err
+    assert "Network error" in err
+    assert "Traceback" not in err
+
+
+def test_auth_url_needs_no_network(tmp_path, capsys):
+    config = _closed_port_config(tmp_path)
+    assert cli.main(["auth", "url"], config=config) == 0
+    assert "Traceback" not in capsys.readouterr().err
 
 
 def test_serve_without_env_lists_tools(tmp_path):
