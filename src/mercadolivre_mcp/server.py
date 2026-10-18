@@ -54,7 +54,7 @@ class Server:
     def handle_line(self, line: str) -> dict | None:
         try:
             message = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: absurdly nested input
             return _error(None, -32700, "Parse error")
         return self.handle(message)
 

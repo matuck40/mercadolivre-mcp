@@ -256,6 +256,17 @@ def test_serve_writes_only_json_lines():
     assert "Traceback" not in out.getvalue() and "Traceback" in stderr.getvalue()
 
 
+def test_deeply_nested_line_is_parse_error_and_keeps_serving():
+    server, _ = make_server()
+    ping = json.dumps(rpc("ping", id=9)) + "\n"
+    out = io.StringIO()
+    server.serve(io.StringIO("[" * 100000 + "\n" + ping), out)
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["error"]["code"] == -32700
+    assert json.loads(lines[1]) == {"jsonrpc": "2.0", "id": 9, "result": {}}
+
+
 def test_handle_never_raises_on_bad_params():
     server, _ = make_server()
     assert call(server, 5)["error"]["code"] == -32602
