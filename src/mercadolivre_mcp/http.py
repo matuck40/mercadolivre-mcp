@@ -65,7 +65,9 @@ def request(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)  # noqa: S310 - scheme is checked by callers
+    # The scheme is fixed by Config.api_base / Config.auth_base, which no env var can set:
+    # https by default; only the tests point them at http://127.0.0.1.
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)  # noqa: S310
     try:
         with _opener.open(req, timeout=timeout) as resp:  # noqa: S310
             return resp.status, _parse(resp.read())
