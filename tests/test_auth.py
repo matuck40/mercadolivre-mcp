@@ -203,3 +203,56 @@ def test_exchange_code_failure(config: Config, fake_ml: FakeML) -> None:
     with pytest.raises(AuthError, match=r"Authorization code exchange failed \(400\)"):
         exchange_code(config, store, "bad")
     assert not store.path.exists()
+
+
+def test_refresh_error_does_not_echo_token_fields(
+    config: Config, store: TokenStore, fake_ml: FakeML
+) -> None:
+    fake_ml.route(
+        "POST",
+        "/oauth/token",
+        body={"refresh_token": "NEW-REFRESH-SECRET", "token_type": "bearer"},
+    )
+    with pytest.raises(AuthError) as info:
+        refresh(config, store)
+    message = str(info.value)
+    assert "NEW-REFRESH-SECRET" not in message
+    assert "Token refresh failed (200): unexpected response" in message
+    assert "auth url" in message
+
+
+def test_refresh_error_keeps_error_fields(
+    config: Config, store: TokenStore, fake_ml: FakeML
+) -> None:
+    fake_ml.route(
+        "POST",
+        "/oauth/token",
+        status=400,
+        body={"error": "invalid_grant", "message": "x", "refresh_token": "LEAKED-SECRET"},
+    )
+    with pytest.raises(AuthError) as info:
+        refresh(config, store)
+    message = str(info.value)
+    assert "invalid_grant" in message
+    assert "LEAKED-SECRET" not in message
+
+
+def test_refresh_error_ignores_non_dict_body(
+    config: Config, store: TokenStore, fake_ml: FakeML
+) -> None:
+    fake_ml.route("POST", "/oauth/token", status=502, body="RAW-BODY-SECRET")
+    with pytest.raises(AuthError) as info:
+        refresh(config, store)
+    message = str(info.value)
+    assert "RAW-BODY-SECRET" not in message
+    assert "(502)" in message
+
+
+def test_exchange_code_error_does_not_echo_token_fields(config: Config, fake_ml: FakeML) -> None:
+    store = TokenStore(config.secrets_dir)
+    fake_ml.route("POST", "/oauth/token", body={"refresh_token": "NEW-REFRESH-SECRET"})
+    with pytest.raises(AuthError) as info:
+        exchange_code(config, store, "TG-code")
+    message = str(info.value)
+    assert "NEW-REFRESH-SECRET" not in message
+    assert "Authorization code exchange failed (200): unexpected response" in message

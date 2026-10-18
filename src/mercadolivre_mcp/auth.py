@@ -128,8 +128,25 @@ def _post_token(config: Config, form: dict[str, str]) -> tuple[int, Any]:
     return request("POST", f"{config.api_base}/oauth/token", form=form)
 
 
-def _body_text(body: Any) -> str:
-    return body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
+_ERROR_FIELDS = ("error", "error_description", "message")
+_MAX_ERROR_FIELD = 200
+
+
+def _error_summary(body: Any) -> str:
+    """Describe a failed token response using only its error fields.
+
+    The rest of the body is never echoed: a malformed reply may still carry a
+    refresh or access token, and this text reaches the model as the tool result.
+    """
+    if isinstance(body, dict):
+        parts = [
+            str(body[name])[:_MAX_ERROR_FIELD]
+            for name in _ERROR_FIELDS
+            if body.get(name) not in (None, "")
+        ]
+        if parts:
+            return ": ".join(parts)
+    return "unexpected response"
 
 
 def refresh(config: Config, store: TokenStore) -> dict[str, Any]:
@@ -146,7 +163,7 @@ def refresh(config: Config, store: TokenStore) -> dict[str, Any]:
     )
     if status != 200 or not isinstance(body, dict) or "access_token" not in body:
         raise AuthError(
-            f"Token refresh failed ({status}): {_body_text(body)}. "
+            f"Token refresh failed ({status}): {_error_summary(body)}. "
             "Run `mercadolivre-mcp auth url` to authorize again."
         )
     new = dict(body)
@@ -190,5 +207,5 @@ def exchange_code(config: Config, store: TokenStore, code: str) -> dict[str, Any
         },
     )
     if status != 200 or not isinstance(body, dict) or "access_token" not in body:
-        raise AuthError(f"Authorization code exchange failed ({status}): {_body_text(body)}")
+        raise AuthError(f"Authorization code exchange failed ({status}): {_error_summary(body)}")
     return store.save(body)
