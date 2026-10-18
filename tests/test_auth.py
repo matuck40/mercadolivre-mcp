@@ -70,6 +70,48 @@ def test_save_tightens_existing_loose_file(tmp_path: Path) -> None:
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
+def test_failed_write_keeps_old_token_file(tmp_path: Path, monkeypatch) -> None:
+    store = TokenStore(tmp_path / "s")
+    store.save({"access_token": "old", "refresh_token": "old-refresh"})
+    before = store.path.read_bytes()
+    real_write = os.write
+
+    def broken_write(fd: int, data: bytes) -> int:
+        real_write(fd, bytes(data[:5]))
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "write", broken_write)
+    with pytest.raises(OSError, match="No space left"):
+        store.save({"access_token": "new", "refresh_token": "new-refresh"})
+    monkeypatch.undo()
+    assert store.path.read_bytes() == before
+    assert sorted(p.name for p in store.path.parent.iterdir()) == ["token.json"]
+
+
+def test_short_writes_are_completed(tmp_path: Path, monkeypatch) -> None:
+    store = TokenStore(tmp_path / "s")
+    real_write = os.write
+
+    def one_byte_write(fd: int, data: bytes) -> int:
+        return real_write(fd, bytes(data[:1]))
+
+    monkeypatch.setattr(os, "write", one_byte_write)
+    store.save({"access_token": "a" * 50})
+    monkeypatch.undo()
+    assert store.load()["access_token"] == "a" * 50
+    assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
+
+
+def test_save_replaces_file_atomically(tmp_path: Path) -> None:
+    store = TokenStore(tmp_path / "s")
+    store.save({"access_token": "a"})
+    first_inode = os.stat(store.path).st_ino
+    store.save({"access_token": "b"})
+    assert os.stat(store.path).st_ino != first_inode
+    assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
+    assert sorted(p.name for p in store.path.parent.iterdir()) == ["token.json"]
+
+
 def test_load_missing_raises_auth_error_with_hint(tmp_path: Path) -> None:
     with pytest.raises(AuthError, match="mercadolivre-mcp auth url"):
         TokenStore(tmp_path / "none").load()

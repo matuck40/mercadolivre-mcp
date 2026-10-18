@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import secrets
 import stat
 import time
 import urllib.parse
@@ -22,21 +24,49 @@ DEFAULT_EXPIRES_IN = 21600
 
 
 def _write_private(path: Path, payload: bytes) -> None:
-    """Write ``payload`` to ``path`` with mode 0600, creating the parent dir with 0700."""
+    """Atomically write ``payload`` to ``path`` with mode 0600 (parent dir 0700).
+
+    The bytes go to a new temp file in the same directory, which is fsynced and then
+    renamed over ``path``. A failed or interrupted write leaves the old file untouched,
+    which matters because a refresh token can be used only once.
+    """
     directory = path.parent
     os.makedirs(directory, mode=0o700, exist_ok=True)
     dir_mode = stat.S_IMODE(os.stat(directory).st_mode)
     if dir_mode & 0o077:
         os.chmod(directory, dir_mode & 0o700)
 
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    tmp = directory / f".{path.name}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        # Also fixes a pre-existing file that was created with looser bits.
-        os.fchmod(fd, 0o600)
-        os.write(fd, payload)
+        try:
+            os.fchmod(fd, 0o600)  # the umask cannot loosen it, but be explicit
+            view = memoryview(payload)
+            while view:
+                view = view[os.write(fd, view) :]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    _fsync_dir(directory)
+
+
+def _fsync_dir(directory: Path) -> None:
+    """Persist the rename itself; not every platform can open a directory."""
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
     finally:
-        os.close(fd)
-    os.chmod(path, 0o600)
+        os.close(dir_fd)
 
 
 def save_oauth_state(secrets_dir: Path, state: str) -> None:
