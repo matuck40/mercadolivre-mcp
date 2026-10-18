@@ -12,7 +12,9 @@ against the live Mercado Livre API yet.
 
 ## Tools
 
-Ten tools. The table below was generated from the `TOOLS` registry in the code.
+Ten tools. The table below matches the `TOOLS` registry (and the live `tools/list` output).
+The MCP Inspector CLI (`npx @modelcontextprotocol/inspector@2.11.0 --cli <server> --method
+tools/list`) was run against the server and listed these 10 tools.
 
 | Tool | What it does | Access | Confirm gate |
 |---|---|---|---|
@@ -62,27 +64,28 @@ list `[]` keeps all of them.
 - `ml_upload_picture` only uploads real JPEG, PNG or WEBP files, given by absolute path, up to
   10 MB. It checks the file header, not the extension. It does not change any listing.
 - `ml_api_get` only sends GET requests, and only to the configured API host.
-- Credentials (`ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI`) are read only from
-  environment variables. There is no config file.
+- Configuration (`ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI`, `ML_SECRETS_DIR`) is
+  read only from environment variables. There is no config file.
 - The token is stored locally in `ML_SECRETS_DIR/token.json` with mode 0600 inside a directory
   with mode 0700 (default directory: `~/.config/mercadolivre-mcp`). The pending OAuth state file
   is written the same way, with mode 0600. Pre-existing looser modes are tightened on write
-  (`test_token_file_mode_0600`, `test_secrets_dir_mode_0700` in `tests/test_auth.py`).
+  (`test_token_file_mode_0600`, `test_secrets_dir_mode_0700`, `test_save_tightens_loose_dir`,
+  `test_save_tightens_existing_loose_file` in `tests/test_auth.py`).
 - No telemetry. The only network destination is the API host `api.mercadolibre.com`. During
   authorization, your own browser also visits `auth.mercadolivre.com.br`.
 
 ### Hardening over the original script
 
-This server was extracted from a private single-file script. Three behaviors were changed on
+This server was extracted from a private script (a small script plus a separate OAuth helper script). Three behaviors were changed on
 purpose. Each has a scenario in `tests/security_scenarios.py`, run against this code by
-`tests/test_security_fixes.py`, and unit tests next to the code. The same five scenarios were
+`tests/test_security_fixes.py`, and unit tests in `tests/`. The same five scenarios were
 also run against the original script, and all five failed there. The original script is not
 part of this repository.
 
 **F1. Upload only real images, by absolute path.**
 - What could go wrong: an uploader that accepts any file can be pointed at something else, for
-  example a private key, and send its contents to Mercado Livre. Relative paths resolve against
-  whatever the working directory happens to be.
+  example a private key, and send its contents to Mercado Livre. The original script resolved
+  relative paths against a base directory the caller cannot see.
 - What the server does: it requires an absolute path to a regular file of at most 10 MB whose
   first bytes are JPEG, PNG or WEBP. Anything else is refused before any request is made.
 - Tests: `scenario_upload_refuses_non_image`, `scenario_upload_refuses_relative_path`; unit tests
@@ -91,7 +94,7 @@ part of this repository.
 **F2. The token never leaves the API host.**
 - What could go wrong: the original script used `urllib` with its default redirect handling,
   which follows a 3xx response and re-sends the `Authorization` header to the new host. A
-  redirect to another host would leak the bearer token. That was the real leak.
+  redirect to another host would leak the bearer token. That was the real vulnerability (reproduced with a fake redirect in the tests).
 - What the server does: redirects are never followed; a 3xx answer is returned as an API error.
   In addition, as defense in depth, every request path must start with `/`, and a path starting
   with `//`, containing `://` or containing whitespace or control characters is rejected before
@@ -140,7 +143,7 @@ Check the install with `mercadolivre-mcp --version` (from a clone: `uv run merca
 
 ## Authorize (OAuth)
 
-1. Create an application in the Mercado Livre developers portal and set its redirect URI. Note
+1. Create an application in the [Mercado Livre developers portal](https://developers.mercadolivre.com.br/) and set its redirect URI. Note
    the client id and the client secret.
 2. Export the three variables (placeholder values shown):
 
@@ -173,7 +176,8 @@ claude mcp add mercadolivre \
   -- mercadolivre-mcp
 ```
 
-Or in a project `.mcp.json`:
+Or in a project `.mcp.json`, using environment variable expansion so the values come from your
+shell and the secret stays out of a file that is often committed:
 
 ```json
 {
@@ -181,9 +185,9 @@ Or in a project `.mcp.json`:
     "mercadolivre": {
       "command": "mercadolivre-mcp",
       "env": {
-        "ML_CLIENT_ID": "your-client-id",
-        "ML_CLIENT_SECRET": "your-client-secret",
-        "ML_REDIRECT_URI": "https://example.com/callback"
+        "ML_CLIENT_ID": "${ML_CLIENT_ID}",
+        "ML_CLIENT_SECRET": "${ML_CLIENT_SECRET}",
+        "ML_REDIRECT_URI": "${ML_REDIRECT_URI}"
       }
     }
   }
@@ -209,15 +213,15 @@ In `claude_desktop_config.json`:
 }
 ```
 
-In all of these the client secret ends up in the client's config file. Keep that file private
-and do not commit it. If the client cannot find `mercadolivre-mcp` on its PATH, use the
+With `claude mcp add` and with Claude Desktop, the client secret ends up in the client's config
+file. Keep that file private and do not commit it. If the client cannot find `mercadolivre-mcp` on its PATH, use the
 absolute path of the executable as `command`.
 
 ## Limits
 
 - Mercado Livre only, and the authorization URL is the Brazil site (`auth.mercadolivre.com.br`).
-- The Mercado Livre API refuses requests from part of the cloud IP ranges, so run the server on
-  the seller's own machine.
+- In practice the Mercado Livre API has refused requests from some cloud IP ranges, so run the
+  server on the seller's own machine.
 - Page sizes are capped: `ml_list_items`, `ml_list_questions` and `ml_list_orders` accept a
   `limit` of at most 50 per call; use `offset` to page.
 - `ml_update_item` cannot delete a variation (see above).
