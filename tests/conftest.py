@@ -9,6 +9,7 @@ import pytest
 from fake_ml import FakeML
 
 from mercadolivre_mcp.auth import TokenStore
+from mercadolivre_mcp.client import MLClient
 from mercadolivre_mcp.config import Config
 
 
@@ -58,3 +59,8 @@ def store(config: Config) -> TokenStore:
         }
     )
     return token_store
+
+
+@pytest.fixture
+def client(config: Config, store: TokenStore) -> MLClient:
+    return MLClient(config, store)
