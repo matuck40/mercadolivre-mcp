@@ -44,7 +44,14 @@ def _variation_summary(variation: dict) -> dict:
         "available_quantity": variation.get("available_quantity"),
         "sold_quantity": variation.get("sold_quantity"),
         "picture_ids": variation.get("picture_ids") or [],
-        "seller_sku": variation.get("seller_custom_field"),
+        "seller_sku": next(
+            (
+                a.get("value_name")
+                for a in variation.get("attributes") or []
+                if a.get("id") == "SELLER_SKU"
+            ),
+            None,
+        ),
     }
 
 

@@ -156,8 +156,16 @@ def test_get_item_includes_attributes_and_description(fake_ml, client):
                 "available_quantity": 1,
                 "sold_quantity": 4,
                 "picture_ids": ["pic-1"],
-                "seller_custom_field": "SKU-1",
-            }
+                "attributes": [
+                    {"id": "COLOR", "value_name": "Red"},
+                    {"id": "SELLER_SKU", "value_name": "SKU-1"},
+                ],
+            },
+            {
+                "id": 78,
+                "attribute_combinations": [{"value_name": "Blue"}],
+                "seller_custom_field": "ONLY-CUSTOM",
+            },
         ],
     )
     fake_ml.route("GET", f"/items/{ITEM_ID}", body=item)
@@ -173,7 +181,15 @@ def test_get_item_includes_attributes_and_description(fake_ml, client):
             "sold_quantity": 4,
             "picture_ids": ["pic-1"],
             "seller_sku": "SKU-1",
-        }
+        },
+        {
+            "id": 78,
+            "combination": "Blue",
+            "available_quantity": None,
+            "sold_quantity": None,
+            "picture_ids": [],
+            "seller_sku": None,
+        },
     ]
 
 
