@@ -7,8 +7,11 @@ question and upload a picture. The JSON-RPC layer is written by hand on top of t
 standard library, so there are zero runtime dependencies (`dependencies = []` in
 `pyproject.toml`).
 
-Status: version 0.1.0. The test suite runs against a local fake API. The server has not been run
-against the live Mercado Livre API yet.
+Status: version 0.1.0. The test suite runs against a local fake API. Against a live seller
+account (2026-10-18), only reads and a preview were exercised: `ml_get_account`, `ml_list_items`,
+`ml_update_item` without `confirm` (it returned the preview and sent no write request) and
+`ml_get_item` afterwards (the price was unchanged). No write has been confirmed against the live
+API.
 
 ## Tools
 
