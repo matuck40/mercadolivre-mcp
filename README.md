@@ -1,5 +1,7 @@
 # mercadolivre-mcp
 
+[![CI](https://github.com/matuck40/mercadolivre-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/matuck40/mercadolivre-mcp/actions/workflows/ci.yml) **196 tests**, run against a local fake API.
+
 A stdio [Model Context Protocol](https://modelcontextprotocol.io) server for the Mercado Livre
 seller API. It lets an MCP client (Claude Code, Claude Desktop, ...) read your account, listings,
 questions, orders and visits, and make a small set of changes: update a listing, answer a buyer
